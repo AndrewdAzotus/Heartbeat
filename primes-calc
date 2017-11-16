@@ -29,7 +29,7 @@ try:
   SQLSrvr = "192.168.136.110"
   if (PrimeTblName == "london"):
     SQLSrvr = "localhost"
-  Cxn = MySQLdb.connect(host = SQLSrvr, user = "PrimesCalc", passwd = "Eratos", db = "Primes")
+  Cxn = MySQLdb.connect(host = SQLSrvr, user = "<userid>", passwd = "<pswd>", db = "Primes")
   PrimeDB = Cxn.cursor()
   # the following create command works except for auth - not sure if I want to grant auth...
   # PrimeDB.execute("SET sql_notes = 0;") # turns off warnings
