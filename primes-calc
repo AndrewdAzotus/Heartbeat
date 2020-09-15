@@ -1,43 +1,14 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 import datetime
 import os
 import string
 import sys
 import time
 
-# SETUP:
-# look for ##<<## and ##vv## and update as indicated in the comments and save this program as
-# /usr/local/bin/primes-calc
-# the database server needs a database called Primes and a user granted Create and Update access to the database
-# you do not need to create any tables, they are created by this program, each machine will have its own table
-# with just two columns: Idx and Factors
-# each table will have rows as follows:
-# Idx=0 -- Factors == highest prime ever found
-# Idx=1 -- Factors == highest prime found since last reset
-# Idx=2 -- Factors == datetime of last time table was updated
-# other -- Factors == NULL, this number is prime
-#       -- Factors == numbers, these are factors of number in Idx, e.g.
-# +--------+------------------+
-# | Idx    | Factors          |
-# +--------+------------------+
-# |      0 | 910051           |
-# |      1 | 176089           |
-# |      2 | 2020-05-14 07:20 |
-# | 176091 | 743 79 3         |
-# | 176093 | 601 293          |
-# | 176095 | 859 41 5         |
-#
-# add a row to sudo crontab -e like:
-#   *  *  *  *  *  /usr/local/bin/primes-calc
-# 
-# if you want the table to be reset on reboot, edit /etc/rc.local and add:
-# if [ "$_HOSTNAME" != "raspberrypi" ]; then
-#   /usr/local/bin/primes-calc --reset --debug > /tmp/primes-calc-reset.log
-# fi
-# note: I do not reset the list if the hostname is raspberrypi
-#
+fileNameTodo = "/tmp/primes.todo"
+numTimes = 0
 
-Debug = False
+Debug = True
 Reset = False
 for arg in sys.argv:
   if arg == "--debug":
@@ -46,8 +17,6 @@ for arg in sys.argv:
     Reset = True
 if Debug:
   print("In Debug Mode")
-
-try:
   import MySQLdb
 except ImportError:
   print("Error: you need to import MySQL extension for Python")
@@ -58,31 +27,34 @@ if Debug:
   print(PrimeTblName)
 
 foundDBSrvr = False
-chkDBSrvrCtr = 797 if Reset else 1
 while (foundDBSrvr != True):
   try:
-    SQLSrvr = "???.???.???.???"                      ##<<## enter ip addr of your MySQL Server
-    if (PrimeTblName == "????????"):                 ##<<## enter hostname of your MySQL Server
+    SQLSrvr = "192.168.136.110"
+    if (PrimeTblName == "london"):
       SQLSrvr = "localhost"
-                                                     ##vv## enter username and password of MySQL user with
-                                                     ##vv## FULL access to the Primes database on SQL Server
-                                                     ##vv## it needs Create as well as Update
-    Cxn = MySQLdb.connect(host = SQLSrvr, user = "????????", passwd = "????????", db = "Primes")
+    Cxn = MySQLdb.connect(host = SQLSrvr, user = "PrimesCalc", passwd = "Eratos", db = "Primes")
     PrimeDB = Cxn.cursor()
     foundDBSrvr = True
     # the following create command works except for auth - not sure if I want to grant auth...
     # PrimeDB.execute("SET sql_notes = 0;") # turns off warnings
     # PrimeDB.execute("CREATE TABLE if not exists %s (Idx int(11) NOT NULL, Factors varchar(64) DEFAULT NULL,  PRIMARY KEY (Idx));" % (PrimeTblName))
     # PrimeDB.execute("SET sql_notes = 1;") # turns them on again
-  except MySQLdb.Error, e:
+  except (MySQLdb.Error, e):
     print("Error %d: %s" % (e.args[0], e.args[1]))
-    chkDBSrvrCtr = chkDBSrvrCtr - 1
-    if (chkDBSrvrCtr == 0):
-      print("ah bugger it, I'm giving up")
-      sys.exit(1)
-    time.sleep(4.7)
+    if (os.path.exists(fileNameTodo)):
+      with open(fileNameTodo) as primesTodo:
+        lnData = primesTodo.readline()
+        if (lnData == "reset"):
+          lnData = primesTodo.readline()
+        numTimes = int(lnData)
+    with open(fileNameTodo, "w") as primesTodo:
+      if (Reset):
+        primesTodo.write("reset\n")
+      primesTodo.write("{}\n".format(numTimes + 1))
+    # time.sleep(2.3)
+    sys.exit(1)
 
-def UpdtRcds(Ofst,Factors):
+def UpdtRcds(Ofst, Factors):
   if Debug:
     print("In Update function")
   for Factor in Factors:
@@ -94,7 +66,7 @@ def UpdtRcds(Ofst,Factors):
     PrimeDB.execute("Select Count(*) from %s Where Idx=%i" % (PrimeTblName, NextPrime))
     Ctr = PrimeDB.fetchone()
     if Debug:
-      print Ctr
+      print(Ctr)
     if Ctr[0] == 0:
       PrimeDB.execute("Insert %s (Idx,Factors) Values(%i,%s)" % (PrimeTblName, NextPrime, Factor))
     else:
@@ -105,6 +77,20 @@ def UpdtRcds(Ofst,Factors):
       PrimeDB.execute(SQLCmd)
 
 ###############################################################################
+
+if (os.path.exists(fileNameTodo)):
+  with open(fileNameTodo) as primesTodo:
+    lnData = primesTodo.readline()
+    if Debug:
+      print(lnData)
+    if (lnData == "reset\n"):
+      Reset = True
+      lnData = primesTodo.readline()
+      if Debug:
+        print(lnData)
+    numTimes = int(lnData)
+  os.remove(fileNameTodo)
+numTimes += 1 # because it is also supposed to run now as well as catch up for the previous missing runs
 
 if Reset:
   PrimeDB.execute("SET sql_notes = 0;") # turns off warnings
@@ -117,76 +103,80 @@ if Reset:
   print("Prime Number List reset.")
 
 try:
-  PrimeDB.execute("Select * from %s Where Idx=1" % (PrimeTblName))
-  row = PrimeDB.fetchone()
-  if Debug:
-    print(row)
-  if row == None: # when empty this needs to be row, when data read this needs to be row[1]!!!!
-    PrimeDB.execute("Insert %s (Idx,Factors) Values(0,2)" % (PrimeTblName))
-    PrimeDB.execute("Insert %s (Idx) Values(1)" % (PrimeTblName))
-    PrimeDB.execute("Insert %s (Idx) Values(2)" % (PrimeTblName))
-    ThisPrime = 1
-  else:
-    if row[1] == "":
+  while (numTimes > 0):
+    PrimeDB.execute("Select * from %s Where Idx=1" % (PrimeTblName))
+    row = PrimeDB.fetchone()
+    if Debug:
+      print(row)
+    if row == None: # when empty this needs to be row, when data read this needs to be row[1]!!!!
+      PrimeDB.execute("Insert %s (Idx,Factors) Values(0,2)" % (PrimeTblName))
+      PrimeDB.execute("Insert %s (Idx) Values(1)" % (PrimeTblName))
+      PrimeDB.execute("Insert %s (Idx) Values(2)" % (PrimeTblName))
       ThisPrime = 1
+      if (numTimes == 1):
+        sys.exit(0)
     else:
-      ThisPrime = int(row[1])
-  PrimeDB.execute("Select * from %s Where Idx=%i" % (PrimeTblName, ThisPrime))
-  row = PrimeDB.fetchone()
-  #if row == None or row == "": # when empty this needs to be row, when data read this needs to be row[1]!!!!
-  #  LastFactors = ""
-  #else:
-  LastFactors = row[1]
-  if LastFactors <> None and ThisPrime > 1:
-    PrimeDB.execute("Delete from %s Where Idx=%i" % (PrimeTblName, ThisPrime))
-  ThisPrime = ThisPrime + 2
+      if row[1] == "":
+        ThisPrime = 1
+      else:
+        ThisPrime = int(row[1])
+    PrimeDB.execute("Select * from %s Where Idx=%i" % (PrimeTblName, ThisPrime))
+    row = PrimeDB.fetchone()
+    #if row == None or row == "": # when empty this needs to be row, when data read this needs to be row[1]!!!!
+    #  LastFactors = ""
+    #else:
+    LastFactors = row[1]
+    if LastFactors != None and ThisPrime > 1:
+      PrimeDB.execute("Delete from %s Where Idx=%i" % (PrimeTblName, ThisPrime))
+    ThisPrime = ThisPrime + 2
+    #
+    PrimeDB.execute("Select Count(*) from %s Where Idx=%i" % (PrimeTblName, ThisPrime))
+    Ctr = PrimeDB.fetchone()
+    if Ctr[0] == 0:
+      if Debug:
+        print("ThisPrime: %i" % (ThisPrime))
+      PrimeDB.execute("Insert %s (Idx) Values(%i)" % (PrimeTblName, ThisPrime))
+      NextPrime = ThisPrime * 3
+      if Debug:
+        print("NextPrime: %i" % (NextPrime))
+      SQLCmd = "Insert %s (Idx, Factors) Values(%i, %i)" % (PrimeTblName, NextPrime, ThisPrime)
+      PrimeDB.execute(SQLCmd)
+      if Debug:
+        print("Executed") #
+      SQLCmd = "Update %s Set Factors=%i Where Idx=1" % (PrimeTblName, ThisPrime)
+      if Debug:
+        print(SQLCmd) #
+      PrimeDB.execute(SQLCmd)
+      if Debug:
+        print("Updated Record 1 to %i" % (ThisPrime))
+    else:
+      if Debug:
+        print("Updating existing number %i" % (ThisPrime))
+      SQLCmd = "Select * from %s Where Idx=%i" % (PrimeTblName, ThisPrime)
+      if Debug:
+        print(SQLCmd) #
+      PrimeDB.execute(SQLCmd)
+      if Debug:
+        print("Selected") #
+      NxtRow = PrimeDB.fetchone()
+      if Debug:
+        print("Fetched") #
+      ThisPrime = NxtRow[0]
+      if Debug:
+        print("Working on %d (should be same as above)" % (ThisPrime))
+      PrimeFactors = NxtRow[1].split()
+      if Debug:
+        print(PrimeFactors)
+      UpdtRcds(ThisPrime, PrimeFactors) ### <- call
+      SQLCmd = "Update %s Set Factors=%i Where Idx=1" % (PrimeTblName, ThisPrime)
+      if Debug:
+        print(SQLCmd) #
+      PrimeDB.execute(SQLCmd)
+      if Debug:
+        print("Updated Record 1 to %i" % (ThisPrime)) #
+    numTimes -= 1
 
-  PrimeDB.execute("Select Count(*) from %s Where Idx=%i" % (PrimeTblName, ThisPrime))
-  Ctr = PrimeDB.fetchone()
-  if Ctr[0] == 0:
-    if Debug:
-      print("ThisPrime: %i" % (ThisPrime))
-    PrimeDB.execute("Insert %s (Idx) Values(%i)" % (PrimeTblName, ThisPrime))
-    NextPrime = ThisPrime * 3
-    if Debug:
-      print("NextPrime: %i" % (NextPrime))
-    SQLCmd = "Insert %s (Idx,Factors) Values(%i,%i)" % (PrimeTblName, NextPrime, ThisPrime)
-    PrimeDB.execute(SQLCmd)
-    if Debug:
-      print("Executed") #
-    SQLCmd = "Update %s Set Factors=%i Where Idx=1" % (PrimeTblName, ThisPrime)
-    if Debug:
-      print(SQLCmd) #
-    PrimeDB.execute(SQLCmd)
-    if Debug:
-      print("Updated Record 1 to %i" % (ThisPrime))
-  else:
-    if Debug:
-      print("Updating existing number %i" % (ThisPrime))
-    SQLCmd = "Select * from %s Where Idx=%i" % (PrimeTblName, ThisPrime)
-    if Debug:
-      print(SQLCmd) #
-    PrimeDB.execute(SQLCmd)
-    if Debug:
-      print("Selected") #
-    NxtRow = PrimeDB.fetchone()
-    if Debug:
-      print("Fetched") #
-    ThisPrime = NxtRow[0]
-    if Debug:
-      print("Working on %d (should be same as above)" % (ThisPrime))
-    PrimeFactors = string.split(NxtRow[1])
-    if Debug:
-      print(PrimeFactors)
-    UpdtRcds(ThisPrime, PrimeFactors) ### <- call
-    SQLCmd = "Update %s Set Factors=%i Where Idx=1" % (PrimeTblName, ThisPrime)
-    if Debug:
-      print(SQLCmd) #
-    PrimeDB.execute(SQLCmd)
-    if Debug:
-      print("Updated Record 1 to %i" % (ThisPrime)) #
-
-except MySQLdb.Error,e:
+except (MySQLdb.Error,e):
   print("Error %d: %s" % (e.args[0], e.args[1]))
   sys.exit(1)
 
@@ -201,7 +191,7 @@ if Debug:
   print(SQLtxt)
 PrimeDB.execute("Update %s Set Factors='%s' Where Idx=2;" % (PrimeTblName, updtdAt))
 if Debug:
-  print ">>>Last Updated at %s" % (updtdAt)
+  print(">>>Last Updated at %s" % (updtdAt))
 
 if Debug:
   PrimeDB.execute("Select Factors From %s Where Idx=0" % (PrimeTblName))
@@ -214,9 +204,9 @@ if Debug:
   PrimeDB.execute(SQLCmd)
   results = PrimeDB.fetchall()
   for row in results:
-    Dspy = "Found: %d " % (row[0])
+    Dspy = "Found: {} ".format(row[0])
     if row[1] != None:
-      Dspy = Dspy + "( Factors = %s )" % (row[1])
+      Dspy = Dspy + "( Factors = {} )".format(row[1])
     print(Dspy)
 
 PrimeDB.close()
