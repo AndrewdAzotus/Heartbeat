@@ -13,7 +13,7 @@ import time
 # with just two columns: Idx and Factors
 # each table will have rows as follows:
 # Idx=0 -- Factors == highest prime ever found
-# Idx=1 -- Factors == highest primefound since last reset
+# Idx=1 -- Factors == highest prime found since last reset
 # Idx=2 -- Factors == datetime of last time table was updated
 # other -- Factors == NULL, this number is prime
 #       -- Factors == numbers, these are factors of number in Idx, e.g.
